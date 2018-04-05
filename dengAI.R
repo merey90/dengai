@@ -17,11 +17,11 @@ df.test <- inner_join(df.test.features,df.submit)
 rm(df.features, df.labels, df.test.features)
 
 #ggplot(df.data, aes(x = precipitation_amt_mm, y = reanalysis_sat_precip_amt_mm)) + geom_smooth()
-
+## Set functions
 preprocessData <- function(df){
   df$week_start_date <- NULL
   df$precipitation_amt_mm <- NULL
-  df$year <- NULL
+  #df$year <- NULL
   
   df$reanalysis_air_temp_k <- df$reanalysis_air_temp_k - 273.15
   df$reanalysis_avg_temp_k <- df$reanalysis_avg_temp_k - 273.15
@@ -30,7 +30,7 @@ preprocessData <- function(df){
   df$reanalysis_min_air_temp_k <- df$reanalysis_min_air_temp_k - 273.15
   
   df$city <- as.factor(as.character(df$city))
-  df$weekofyear <- as.factor(as.character(df$weekofyear))
+  #df$weekofyear <- as.factor(as.character(df$weekofyear))
   
   return(df)
 }
@@ -44,7 +44,7 @@ sumVegetations <- function(df){
   return(df)
 }
 
-
+## Predict missing data
 df.data <- preprocessData(df.data)
 df.test <- preprocessData(df.test)
 
@@ -59,36 +59,46 @@ df <- rbind(df.data,df.test)
 registerDoParallel(cores = 4)
 m <- missForest(df, ntree = 100, parallelize = "forests")
 df <- m$ximp
-rm(df, m)
 df.data <- df[c(1:1456),]
 df.test <- df[-c(1:1456),]
+rm(df, m)
 
 sapply(df.data, function(x){sum(is.na(x))})
 
 df.data <- sumVegetations(df.data)
 df.test <- sumVegetations(df.test)
 str(df.data)
-#################
-index <- createDataPartition(df.data$total_cases,p=0.75,list = FALSE)
-df.data.train <- df.data[index,]
-df.data.test <- df.data[-index,]
 
-#table(train$yn)
-#table(test$yn)
+## Test model
+df.sj <- df.data[df.data$city == 'sj',]
+df.iq <- df.data[df.data$city == 'iq',]
+df.sj$city <- NULL
+df.iq$city <- NULL
+summary(df.sj)
+index <- createDataPartition(df.sj$total_cases,p=0.75,list = FALSE)
+df.data.train <- df.sj[index,]
+df.data.test <- df.sj[-index,]
 
 rf.train <- randomForest(total_cases~.,df.data.train,ntree=300,do.trace=TRUE)
-pred <- predict(rf,df.data.test)
+pred.train <- predict(rf.train,df.data.test)
 
-varImpPlot(rf)
-df.data.test$pred <- pred
-ggplot(df.data.test, aes(x = total_cases, y = pred)) + geom_bar()
-roc.curve(df.data.test$total_cases,pred)
-MAE(df.data.test$total_cases,pred)
-####################################
-rf <- randomForest(total_cases~.,df.data,ntree=300,do.trace=TRUE)
-pred.final <- predict(rf,df.test)
+varImpPlot(rf.train)
+df.data.test$pred <- pred.train
+df.data.test$pred.round <- round(pred.train)
+ggplot(df.data.test, aes(x = total_cases, y = pred)) + geom_point()
+ggplot(df.data.train, aes(x = total_cases, y = weekofyear)) + geom_point()
+MAE(df.data.test$total_cases,df.data.test$pred.round)
 
-df.submit$total_cases <- round(pred.final)
+## Submit Data
+rf.sj <- randomForest(total_cases~.,df.sj,ntree=300,do.trace=TRUE)
+rf.iq <- randomForest(total_cases~.,df.iq,ntree=300,do.trace=TRUE)
 
-write.csv(df.submit,"fin.csv",row.names = FALSE)
-#26.3413
+pred.sj <- predict(rf.sj, df.test[df.test$city == 'sj',])
+pred.iq <- predict(rf.iq, df.test[df.test$city == 'iq',])
+str(df.submit)
+df.submit[df.submit$city == 'sj',]$total_cases <- as.integer(round(pred.sj))
+df.submit[df.submit$city == 'iq',]$total_cases <- as.integer(round(pred.iq))
+
+write.csv(df.submit,"fin3.csv",row.names = FALSE)
+
+#25.9736
